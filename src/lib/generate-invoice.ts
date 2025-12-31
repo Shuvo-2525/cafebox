@@ -56,7 +56,7 @@ export const generateInvoice = (order: any) => {
 
     doc.text(`Subtotal: ${order.currency_symbol}${order.total}`, pageWidth - 14, finalY, { align: "right" });
     doc.setFontSize(12);
-    doc.font = "helvetica";
+    doc.setFont("helvetica");
     doc.text(`Total: ${order.currency_symbol}${order.total}`, pageWidth - 14, finalY + 10, { align: "right" });
 
     // -- Save --
