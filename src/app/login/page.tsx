@@ -28,6 +28,8 @@ export default function LoginPage() {
             const isAdmin = await verifyAdmin(userCredential.user.uid);
 
             if (isAdmin) {
+                // Set session cookie
+                document.cookie = "__session=true; path=/; max-age=86400; SameSite=Strict";
                 router.push("/dashboard");
             } else {
                 await auth.signOut();
@@ -50,6 +52,8 @@ export default function LoginPage() {
             const isAdmin = await verifyAdmin(userCredential.user.uid);
 
             if (isAdmin) {
+                // Set session cookie
+                document.cookie = "__session=true; path=/; max-age=86400; SameSite=Strict";
                 router.push("/dashboard");
             } else {
                 await auth.signOut();

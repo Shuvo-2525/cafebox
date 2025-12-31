@@ -33,6 +33,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const signOut = async () => {
         await firebaseSignOut(auth);
+        // Clear session cookie
+        document.cookie = "__session=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
         router.push("/login");
     };
 
