@@ -35,6 +35,10 @@ interface Order {
             src: string;
         };
     }>;
+    meta_data: Array<{
+        key: string;
+        value: string;
+    }>;
 }
 
 async function fetchOrders(): Promise<Order[]> {

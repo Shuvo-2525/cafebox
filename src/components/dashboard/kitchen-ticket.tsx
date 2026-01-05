@@ -1,9 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Clock, CheckCircle, ChefHat } from "lucide-react";
+import { Clock, CheckCircle, ChefHat, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useUpdateOrder } from "@/hooks/use-update-order";
+import { useState } from "react";
 
 interface Order {
     id: number;
@@ -22,15 +23,36 @@ interface Order {
 
 export function KitchenTicket({ order }: { order: Order }) {
     const { mutate: updateOrder, isPending } = useUpdateOrder();
+    const [isCompleting, setIsCompleting] = useState(false);
 
-    const handleStatusChange = (newStatus: string) => {
-        updateOrder({ orderId: order.id, status: newStatus });
+    // Need to use the server action directly for metadata, or update the hook.
+    // simpler to just call the action here for the complex metadata + status update
+    // But let's see if we can just use the action directly to be safe.
+
+    const handleComplete = async () => {
+        setIsCompleting(true);
+        // 1. Mark status as completed (WC)
+        // 2. Mark metadata as completed (Internal)
+
+        // We can do this via the existing hook if we update it, but for now let's use the action
+        // actually `useUpdateOrder` might be just a wrapper around `updateOrderStatus`.
+        // Let's import the actions directly for this specific complex flow.
+
+        const { updateOrderStatus, updateOrderMeta } = await import("@/app/actions/order-actions");
+
+        await updateOrderMeta(order.id, "_pos_stage", "completed");
+        await updateOrderStatus(order.id, "completed");
+
+        // Force refresh via window or query client - ideally query client
+        // Assuming parent component triggers re-render or we invalidate queries.
+        // We'll trust the optimistic UI or just reload for now.
+        window.location.reload();
     };
 
     const timeSince = formatDistanceToNow(new Date(order.date_created), { addSuffix: true });
 
     return (
-        <Card className={`h-full flex flex-col border-2 ${order.status === 'processing' ? 'border-yellow-400' : order.status === 'pending' ? 'border-red-400' : 'border-border'}`}>
+        <Card className={`h-full flex flex-col border-2 border-yellow-400`}>
             <CardHeader className="pb-3 bg-muted/50">
                 <div className="flex justify-between items-start">
                     <div>
@@ -39,8 +61,8 @@ export function KitchenTicket({ order }: { order: Order }) {
                             {order.billing.first_name} {order.billing.last_name}
                         </p>
                     </div>
-                    <Badge variant={order.status === 'processing' ? "secondary" : "default"} className="text-sm uppercase">
-                        {order.status}
+                    <Badge variant="secondary" className="text-sm uppercase">
+                        COOKING
                     </Badge>
                 </div>
                 <div className="flex items-center text-xs text-muted-foreground mt-1 font-mono">
@@ -59,29 +81,14 @@ export function KitchenTicket({ order }: { order: Order }) {
                 </ul>
             </CardContent>
             <CardFooter className="gap-2 pt-0 pb-4">
-                {order.status === 'pending' && (
-                    <Button
-                        className="w-full bg-yellow-500 hover:bg-yellow-600 text-white"
-                        onClick={() => handleStatusChange('processing')}
-                        disabled={isPending}
-                    >
-                        <ChefHat className="mr-2 h-4 w-4" /> Start Cooking
-                    </Button>
-                )}
-                {order.status === 'processing' && (
-                    <Button
-                        className="w-full bg-green-600 hover:bg-green-700 text-white"
-                        onClick={() => handleStatusChange('completed')} // Or 'ready-for-pickup' if custom status exists
-                        disabled={isPending}
-                    >
-                        <CheckCircle className="mr-2 h-4 w-4" /> Order Ready
-                    </Button>
-                )}
-                {order.status === 'completed' && (
-                    <div className="w-full text-center text-green-600 font-bold border rounded-md py-2 bg-green-50">
-                        COMPLETED
-                    </div>
-                )}
+                <Button
+                    className="w-full bg-green-600 hover:bg-green-700 text-white"
+                    onClick={handleComplete}
+                    disabled={isPending || isCompleting}
+                >
+                    {isCompleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
+                    Order Complete
+                </Button>
             </CardFooter>
         </Card>
     );

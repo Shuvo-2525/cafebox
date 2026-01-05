@@ -26,7 +26,7 @@ export default function KitchenPage() {
     }
 
     const activeOrders = orders?.filter(
-        (order) => order.status === "processing" || order.status === "pending"
+        (order) => order.meta_data?.some((m) => m.key === '_pos_stage' && m.value === 'kitchen')
     ) || [];
 
     return (
@@ -41,7 +41,7 @@ export default function KitchenPage() {
 
             {activeOrders.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-[40vh] bg-muted/20 rounded-xl border-dashed border-2">
-                    <p className="text-2xl text-muted-foreground font-light">All caught up! No active orders.</p>
+                    <p className="text-2xl text-muted-foreground font-light">Kitchen is clear. Waiting for orders...</p>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

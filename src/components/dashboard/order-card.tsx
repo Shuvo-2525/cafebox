@@ -1,31 +1,14 @@
-"use client";
-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Loader2, MoreVertical, Image as ImageIcon } from "lucide-react";
+import { Loader2, Image as ImageIcon, Printer, FileText } from "lucide-react";
 import { useState } from "react";
-import { updateOrderStatus } from "@/app/actions/order-actions";
+import { updateOrderStatus, updateOrderMeta } from "@/app/actions/order-actions";
 import Image from "next/image";
 import { useQueryClient } from "@tanstack/react-query";
 import { OrderDetailsSheet } from "./order-details";
 import { generateInvoice } from "@/lib/generate-invoice";
+import { printReceipt } from "@/lib/print-receipt";
 
 interface OrderCardProps {
     order: any;
@@ -40,12 +23,20 @@ const statusColors: Record<string, "default" | "secondary" | "outline" | "destru
     "on-hold": "secondary",
     refunded: "outline"
 };
-
 export function OrderCard({ order }: OrderCardProps) {
     const [isUpdating, setIsUpdating] = useState(false);
     const [showDetails, setShowDetails] = useState(false);
-    const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);
     const queryClient = useQueryClient();
+
+    // Helper to get meta value
+    const getMeta = (key: string) => order.meta_data?.find((m: any) => m.key === key)?.value;
+    const posStage = getMeta('_pos_stage');
+
+    // Display Logic
+    // If WC status is 'processing' BUT no POS stage, we treat it as Pending (New Order)
+    const isActuallyPending = order.status === 'pending' || (order.status === 'processing' && !posStage);
+    const isCooking = posStage === 'kitchen';
+    const isCompleted = order.status === 'completed';
 
     // Get the first product image or fallback
     const mainItem = order.line_items[0];
@@ -54,36 +45,47 @@ export function OrderCard({ order }: OrderCardProps) {
     const quantity = mainItem?.quantity || 0;
     const otherItemsCount = order.line_items.length - 1;
 
-    const handleStatusChange = async (newStatus: string) => {
-        if (newStatus === order.status) return;
-
+    const handleSendToKitchen = async (e: React.MouseEvent) => {
+        e.stopPropagation();
         setIsUpdating(true);
 
+        // 1. Optimistic Update
         const previousOrders = queryClient.getQueryData(["orders"]);
         queryClient.setQueryData(["orders"], (old: any[]) =>
-            old.map(o => o.id === order.id ? { ...o, status: newStatus } : o)
+            old.map(o => o.id === order.id ? {
+                ...o,
+                status: 'processing', // Ensure WC status is processing
+                meta_data: [...(o.meta_data || []), { key: '_pos_stage', value: 'kitchen' }]
+            } : o)
         );
 
-        const result = await updateOrderStatus(order.id, newStatus);
+        // 2. Print Receipt
+        printReceipt(order);
+
+        // 3. API Calls (Parallel)
+        // a. Ensure status is processing (payment accepted) if not already
+        if (order.status !== 'processing') {
+            await updateOrderStatus(order.id, "processing");
+        }
+        // b. Set metadata tag
+        const result = await updateOrderMeta(order.id, "_pos_stage", "kitchen");
 
         if (!result.success) {
             queryClient.setQueryData(["orders"], previousOrders);
-            alert("Failed to update status");
+            alert("Failed to send to kitchen");
         } else {
             queryClient.invalidateQueries({ queryKey: ["orders"] });
-
-            if (newStatus === "completed") {
-                setShowInvoiceDialog(true);
-            }
         }
-
         setIsUpdating(false);
     };
 
-    const handleGenerateInvoice = () => {
+    const handleDownloadInvoice = (e: React.MouseEvent) => {
+        e.stopPropagation();
         generateInvoice(order);
-        setShowInvoiceDialog(false);
     };
+
+    const displayStatus = isCompleted ? 'completed' : isCooking ? 'cooking' : 'pending';
+    const statusColor = isCompleted ? 'default' : isCooking ? 'secondary' : 'outline'; // Green, Blue, Outline
 
     return (
         <>
@@ -130,46 +132,42 @@ export function OrderCard({ order }: OrderCardProps) {
 
                 <CardFooter className="p-3 pt-0 mt-auto">
                     <div className="w-full flex flex-col gap-3">
-                        <div className="text-sm font-medium text-muted-foreground px-1">
-                            {order.billing.first_name} {order.billing.last_name}
+                        <div className="flex justify-between items-center text-sm font-medium text-muted-foreground px-1">
+                            <span>{order.billing.first_name} {order.billing.last_name}</span>
+                            <Badge variant={statusColor as any} className="uppercase text-[10px]">
+                                {displayStatus}
+                            </Badge>
                         </div>
 
-                        {/* Modern Status Button */}
-                        <div onClick={(e) => e.stopPropagation()}>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button
-                                        variant="secondary"
-                                        className="w-full justify-between bg-secondary/50 hover:bg-secondary h-10 transition-all duration-200 group/btn shadow-none border border-transparent hover:border-border/50"
-                                    >
-                                        <span className="flex items-center gap-2">
-                                            <span className={`h-2 w-2 rounded-full ${order.status === 'completed' ? 'bg-green-500' :
-                                                    order.status === 'processing' ? 'bg-blue-500' :
-                                                        order.status === 'pending' ? 'bg-yellow-500' :
-                                                            order.status === 'cancelled' ? 'bg-red-500' : 'bg-gray-500'
-                                                }`} />
-                                            <span className="capitalize font-medium text-foreground/80">{order.status}</span>
-                                        </span>
-                                        {isUpdating ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> :
-                                            <MoreVertical className="h-4 w-4 text-muted-foreground group-hover/btn:text-foreground transition-colors" />
-                                        }
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-[200px]">
-                                    <DropdownMenuItem onClick={() => handleStatusChange("pending")}>
-                                        <div className="h-2 w-2 rounded-full bg-yellow-500 mr-2" /> Pending
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleStatusChange("processing")}>
-                                        <div className="h-2 w-2 rounded-full bg-blue-500 mr-2" /> Processing
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleStatusChange("completed")}>
-                                        <div className="h-2 w-2 rounded-full bg-green-500 mr-2" /> Completed
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleStatusChange("cancelled")}>
-                                        <div className="h-2 w-2 rounded-full bg-red-500 mr-2" /> Cancelled
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                        {/* Action Buttons based on Status */}
+                        <div className="mt-1">
+                            {isActuallyPending && !isCompleted && (
+                                <Button
+                                    className="w-full bg-primary hover:bg-primary/90"
+                                    onClick={handleSendToKitchen}
+                                    disabled={isUpdating}
+                                >
+                                    {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+                                    Send to Kitchen
+                                </Button>
+                            )}
+
+                            {isCompleted && (
+                                <Button
+                                    className="w-full"
+                                    variant="outline"
+                                    onClick={handleDownloadInvoice}
+                                >
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Download Invoice
+                                </Button>
+                            )}
+
+                            {isCooking && !isCompleted && (
+                                <div className="text-center text-xs text-blue-600 py-2 font-bold flex items-center justify-center gap-2 bg-blue-50 rounded-md">
+                                    <Loader2 className="h-3 w-3 animate-spin" /> Cooking in Kitchen...
+                                </div>
+                            )}
                         </div>
                     </div>
                 </CardFooter>
@@ -180,21 +178,6 @@ export function OrderCard({ order }: OrderCardProps) {
                 open={showDetails}
                 onOpenChange={setShowDetails}
             />
-
-            <AlertDialog open={showInvoiceDialog} onOpenChange={setShowInvoiceDialog}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Generate Invoice?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            This order has been marked as completed. Would you like to generate and download the invoice PDF?
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>No, thanks</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleGenerateInvoice}>Yes, Generate PDF</AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
         </>
     );
 }
